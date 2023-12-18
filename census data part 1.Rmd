@@ -1,0 +1,338 @@
+---
+title: "US census analysis"
+author: "Acadia Berry"
+date: "2023-12-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This project examines a set of 14,797 records to determine which characteristics are associated with high income, defined as having income greater than $50,000. 31.6% (3554) of records are of high-income earners. 
+
+# EDA of US Census data
+
+```{r}
+# import libraries
+library(caret)
+library(RANN)
+library(plyr)
+library(rpart)
+library(rpart.plot)
+library(ggplot2)
+
+```
+
+
+
+```{r}
+proj1<- read.csv("census_data.csv")
+
+# set seed
+set.seed(12345)
+
+```
+
+```{r}
+# summary
+summary(proj1)
+table(proj1$income)
+```
+
+22.66% of total customers are high income earners.
+
+```{r}
+# histogram of capital gain
+hist(proj1$capital.gain)
+```
+
+The extreme data values in the right tail all have the exact same value: 99999. It is unlikely that all these individuals have the exact same amount of capital gains. Thus it is likely that the 99999 entry is code for missing.
+
+```{r}
+# set 99999 cg to missing value 
+proj1$capital.gain[proj1$capital.gain == 99999] <- NA
+
+#  mean of capital gain
+cgm <- mean(proj1$capital.gain, na.rm = TRUE)
+cgm # 603.0878
+
+# sd of capital gain 
+cgsd<- sd(proj1$capital.gain, na.rm = TRUE)
+cgsd # 2610.7
+```
+
+```{r}
+# impute missing data into capital gain
+imputation_model <-
+  preProcess(proj1,
+           method = c("knnImpute"))
+
+# new data set with imputed values 
+proj1.imp  <- 
+  predict(imputation_model, proj1) 
+
+# view results
+View(proj1.imp)
+
+```
+
+```{r}
+# Because it is pre-EDA, de-standardize the imputed capital.gain, it is on the original scale, with no missing values, cg.imp
+
+cg.imp<- proj1$cg.imp<-
+  ifelse(
+   test = is.na(proj1$capital.gain) == TRUE,
+  yes = proj1.imp$capital.gain * cgsd + cgm,
+  no = proj1$capital.gain)
+summary(proj1$cg.imp)
+
+table(proj1$cpg.imp)
+
+# proj1$cg.imp <- round(proj1.imp$capital.gain * cgsd + cgm, 5)
+
+# new sd with imputed values
+sd(proj1$cg.imp) # 2606.436
+
+#new mean with imputed values
+mean(proj1$cg.imp) # 605.9433
+```
+
+| Capital Gains | Mean     | Standard Deviation |
+|---------------|----------|--------------------|
+| Original      | 603.0878 | 2610.7             |
+| Imputed       | 605.9433 | 2606.436           |
+
+No systematic differences were presented by adding imputed values to the capital.gains field in place of missing data, as the mean and standard deviation between the original capital.gains data and the imputed capital.gains differ by about 1 percent.
+
+```{r}
+# flag variable: cg.miss
+# 1 when capital.gain (pre-imputation) is missing
+# 0 otherwise
+
+cg.miss = 
+  proj1$cg.miss <- ifelse(test = is.na(proj1$capital.gain) == TRUE, yes = 1,no = 0)
+
+# contingency table for flag variable capital gains & income
+table1 <- table(proj1$income,cg.miss)
+table1
+
+```
+
+| Capital Gains | Cg.miss |     |
+|---------------|---------|-----|
+| Income        | 0       | 1   |
+| \<= 50k       | 11243   | 0   |
+| \> 50k        | 3485    | 69  |
+
+Out of the 69 missing values within the capital.gain field, all missing values are among individuals with an income greater than \$50,000. Interestingly, missing values are not split among income levels. Perhaps high income individuals did not want to disclose capital gain.
+
+```{r}
+# create index
+ID<- proj1$ID <- 1:nrow(proj1)
+
+# create a new column for marital status
+(names(proj1)[names(proj1)=="marital.status"] <- "marital.status.old")
+ 
+
+marital.status<- proj1$marital.status <-
+  revalue(proj1$marital.status,
+          c("Married-civ-spouse" = 1, "Divorced" =0, 
+            "Widowed" = 0, 
+            "Never-married"= 0, 
+            "Married-AF-spouse"=1,
+            "Married-spouse-absent"=1,
+            "Separated"=0))
+
+summary(proj1$marital.status)
+
+proj1$marital.status <- ifelse(proj1$marital.status== 0, "Other", "Married")
+# 0 =  "other" 
+# 1 = "married"
+
+# contingency table with income and marital status
+t1 <- table(proj1$income, proj1$marital.status) 
+t1 #assign table (rows, column)
+
+#proportions of t1, 2 decimal places
+round(prop.table(t1, margin = 2)*100, 2)
+```
+
+|         | Martial Status |       |
+|---------|----------------|-------|
+| Income  | Married        | Other |
+| \<= 50k | 56.20          | 93.65 |
+| \> 50k  | 43.80          | 6.35  |
+
+There are about 7 times more high income married individuals than high income unmarried individuals. 6.35% of unmarried individuals have an income above \$50,000 whereas 43.8% of married individuals have an income over \$50,000. Interestingly, a greater proportion of married individuals earn \<=50k despite the overwhelming majority of records in the "other" category belonging to \<=50k status.
+
+```{r}
+###############
+
+# make capital gain and capital loss one variable
+
+# equal 1 whenever a customer has either any (imputed) capital gains or any capital losses. 
+# 0 otherwise
+
+capgl<- paste(proj1$capital.loss,proj1$capital.gain)
+   
+
+capgl <- ifelse(capgl>= 1, 1, 0)
+# summary
+summary(capgl)
+
+# set as categorical
+capgl <- as.factor(capgl) 
+summary(capgl)
+
+# table comparing income and capital loss or gain
+t2 <- table(proj1$income, capgl) 
+t2
+
+
+# proportion table with column proportions
+round(prop.table(t2, margin = 2)*100, 2)
+
+
+```
+
+|         | capgl |       |
+|---------|-------|-------|
+| Income  | 0     | 1     |
+| \<= 50k | 77.30 | 49.43 |
+| \> 50k  | 22.70 | 50.57 |
+
+The proportion of capital gains or losses does not show a strong relationship with income level, as it is nearly a 50/50 divide between records with \<=50k and \>50k. However, having no capital gains or losses is 3.4 times higher for lower income individuals than high income individuals. Only 22.7% of records with no capital gains or capital losses have income \>50k. Perhaps with higher income, it is less likely for capital to appreciate or depreciate.
+
+**Outliers**
+
+```{r}
+
+# decision tree for predicting income based on education
+eb <- rpart(formula = income ~ education, 
+                  data = proj1, control = rpart.control
+                  (minbucket = .01 * nrow(proj1),
+                      maxdepth=2))
+                  rpart.plot(eb)
+                  
+
+
+```
+
+75% of records with education \<13 years are predicted to make less than 50k.
+
+Records which have education \< 14 years, (9% of total records) are predicted to make over 50k and 16% of total records predicted to make less than 50k.
+
+```{r}
+
+ # use cut function, along with the split thresholds from the tree
+educ.bin <- cut(proj1$education,
+                breaks = c(1, 13, 14, 16))
+summary(proj1$educ.bin)
+
+## contingency table
+## with income for the rows and educ.bin for the columns
+t10<-table(proj1$income, educ.bin)
+t10
+
+#with the column proportions, rounded to two decimal places
+round(prop.table(t10, margin = 2)*100, 2)
+
+```
+
+**Contingency Table of income and education Counts**
+
+| Income  | Education |     |       |
+|---------|-----------|-----|-------|
+|         | 1-12      | 13  | 14-16 |
+| \<= 50k | 10760     | 344 | 115   |
+| \> 50k  | 2753      | 444 | 357   |
+
+**Contingency Table of income and education with column proportions**
+
+| Income  | Education |     |         |
+|---------|-----------|-----|---------|
+|         | 1-12      | 13  | 14 - 16 |
+| \<= 50k | 10760     | 344 | 24.36   |
+| \> 50k  | 2753      | 444 | 75.64   |
+
+As years in education increase, records with income \<=50k decrease dramatically, from 10,760 records in 1-12 years of education to 115 records of 14-16 years of education. There are 93 times the number of records with income \<=50k and education 12 years and less, than records with \<=50k and education of 14 years or more. Interestingly, amount total counts, the inverse relationship is the opposite, with the number of records with income \>50k decreasing as years in education increase. Despite this, the proportion of high-income records increases from 21% for 1-12 years of education, to 75.6% for 14-16 years of education. The overall trend between education and income is supported as records of \<=50k income make up 79.6% of 1-12 years of education, 43.7% of 13 years of education, and 24.4% of 14-16 years of education, showing a gradual decrease in the proportion of high-income earners as years of education increase.
+
+```{r}
+# stacked bar graphs of education with income overlay
+
+    # non-normalized bar chart
+        ggplot(proj1, aes(education))+
+        geom_bar(aes(fill = income), position = "stack")+
+        xlab("Years of Education") + ylab("Income")+
+        ggtitle("Non-normalized Bar Chart of Education with Income Overlay")
+        
+```
+
+The non-normalized bar graph shows a somewhat-normal distribution and indicates most records indicate years of education between 9 and 10 with a significant number at 13 as well.
+
+```{r}
+# normalized bar chart
+        ggplot(proj1, aes(education))+
+        geom_bar(aes(fill = income), position = "fill")+
+        xlab("Years of Education") + ylab("Income")+
+        ggtitle("Normalized Bar Chart of Education With Income Overlay")
+        
+```
+
+The normalized bar graph indicates as years of education increase, records with income \> 50k increase, suggesting there is a correlational relationship between education and income.
+
+A normalized bar chart indicates the proportions between predictor and target variables clearly as each of the bars are stretched from 0-1, or 0-100%, regardless of their count, allowing you to see how each bar relates to the overlay value. You can see greater variability within each x value given the y/x proportion/overlay. A non-normalized bar chart is beneficial for seeing overall distribution of the data and the total counts of the bars (y axis value) in each location.
+
+```{r}
+# counts with row and column totals
+        # proportions with column totals 
+ 
+#income and education counts with row and column totals
+ 
+  #income and sex counts with row and column totals
+  tab14<- table(proj1$income,proj1$sex)
+  tab15 <- addmargins(A = tab14, margin = c(1,2), 
+                        FUN = sum, quiet = TRUE)
+  tab15
+  # income and sex column proportions with column totals only
+  CP2<- round(prop.table(tab14, margin = 2)*100, 2)
+   addmargins(A = CP2, margin = (1), 
+              FUN = sum, quiet = TRUE)
+
+
+   
+```
+
+Contingency Table of income and sex Counts with Row and Column Totals
+
+
+|  Income  | Female  | Male | Totals |
+|:--------:|:-------:|:----:|:------:|
+| \< = 50k |  4348   | 6895 | 11243  |
+|  \>50k   |   564   | 2990 |  3554  |
+|  Totals  |  4912   | 9885 | 14797  |
+
+There are twice as many records of males than records of females, with records of males making up most of the records of both income >50k and income <=50k. 
+
+The table of counts is preferable because it shows the distribution of records, with totals indicating there are less records of females than males, therefore we should look to proportions for understanding relationships related to income.
+
+
+Contingency Table of income and sex Proportions with Column Totals
+
+
+|  Income  | Female  | Male | 
+|:--------:|:-------:|:----:|
+| \< = 50k |  88.52   | 69.75 |
+|  \>50k   |   11.48   | 30.25 |
+|  Totals  |  100   | 100 |
+
+There are 2.63 times the number of records of males with income over 50k (30.25%) than females with income over 50k (11.48%), and females are 1.3 times as likely to have an income of <=50k than males.
+
+The table with column proportions is preferable because it shows the proportions among the certain counts which is a more accurate indicator of a how gender affects income because it is calculated out of 100 for both columns, regardless of their count. 
+
+
+
+
+
+
