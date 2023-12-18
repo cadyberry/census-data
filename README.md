@@ -1,6 +1,6 @@
 
 # EDA of US census data
-This project examines a set of 14,797 customers to determine which customer characteristics are associated with high income, defined as having income greater than $50,000. The most salient findings are as follows:
+This project examines a set of 14,797 customers to determine which customer characteristics are associated with high income, defined as having income greater than $50,000. Key takeaways are as follows:
 
 - 31.6% (3554) of records are of high-income earners.
 - Only 6.35% of unmarried individuals are high-income earners.
